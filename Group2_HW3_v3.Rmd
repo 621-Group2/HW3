@@ -1,0 +1,241 @@
+---
+title: "Group#2 Homework# 3 - Logistic Regression"
+author: "Group 2"
+date: "3/29/2018"
+output: html_document
+---
+#Introduction
+This assignment explores, analyze and model a dataset containing information about crime in various neighborhoods in a major city. Each record has a response variable indicating whether or not the crime rate is above the median crime rate (1) or not (0). The crime dataset contains 18 variables and 466 observations. 
+#Objective and Requirements
+The objective is to build a binary logistic regression model on the training dataset to predict whether the neighborhood will be at risk for high crime levels. Classifications and probabilities for the evaluation dataset using the binary logistic regression model. 
+#Approach
+The team met to discuss this assignment and an approach to plan, complete the assignment. Each of the 5 team members was assigned tasks. The following tasks were assigned:
+*Data Exploration
+*Data Preparation
+*Build Models
+*Select Models
+
+Github was used to manage the project. Using Github helped with version control and ensured each team member had access to the latest version of the project documentation. 
+
+Slack was used to by the team to communicate during the project and for quick access to code and documentation.
+```{r Libraries, echo=FALSE, message=FALSE, warning=FALSE}
+library(psych)
+library(dplyr)
+library(ggplot2)
+#library(DataExplorer)
+library(PerformanceAnalytics)
+library(corrplot)
+library(knitr)
+library(car)
+
+```
+
+#Dataset
+For reproducibility of the results, the data was loaded to and accessed from a Github repository. The age variable was rounded to a whole number.
+```{r Load data, echo=FALSE, message=FALSE, warning=FALSE}
+crime_trainData <- read.csv("https://raw.githubusercontent.com/indianspice/DATA621/master/Hw3/crime-training-data_modified%20(1).csv", header = 3)
+
+crime_trainData$age <- round(crime_trainData[,6], digits = 0)
+
+```
+
+#Data Exploration
+The following variables comprise the data set. The response variable (Target) is the variable of interest. The response variable is binary (0, 1) and identifies whether the crime rate is above the median crime rate. The remaining 12 variables are predictors. All variables are numeric. 
+```{r Data Set Metadata, echo=FALSE, message=FALSE, warning=FALSE}
+Variable_names <- c("zn","indus", "chas", "nox", "rm", "age", "dis", "rad", "tax",
+                     "ptratio", "lstat", "medv", "traget")
+
+Definitions <- c("proportion of residential land zoned for large lots (over 25000 square feet)", "proportion of non-retail business acres per suburb", "a dummy var. for whether the suburb borders the Charles River (1) or not (0)", "nitrogen oxides concentration (parts per 10 million)", " average number of rooms per dwelling", "proportion of owner-occupied units built prior to 1940", "weighted mean of distances to five Boston employment centers"," index of accessibility to radial highways", "full-value property-tax rate per $10,000", " pupil-teacher ratio by town", " lower status of the population (percent)", "median value of owner-occupied homes in $1000s", "whether the crime rate is above the median crime rate (1) or not (0)")
+
+Variable_type <-c("Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Response")
+
+Data_type <- c("Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count")
+
+df_crime_md <- cbind.data.frame (Variable_names, Definitions, Variable_type, Data_type)
+
+colnames(df_crime_md) <- c("Variable Name", "Definition", "Variable Type", "Data Type") 
+knitr::kable(df_crime_md)
+```
+
+Descriptive statistics were calculated to examine the basic features of the data. Each variable has 466 observations.  
+```{r EDA, echo=FALSE, message=FALSE, warning=FALSE}
+#Use Describe Package to calculate Descriptive Statistic
+(df_crime_des <- describe(crime_trainData, na.rm=TRUE, interp=FALSE, skew=TRUE, ranges=TRUE, trim=.1, type=3, check=TRUE, fast=FALSE, quant=c(.1,.25,.75,.90), IQR=TRUE))
+
+#Calculate mean missing values per variable
+crime_trainData %>% summarize_all(funs(sum(is.na(.)) / length(.)))
+
+```
+
+
+#Density Plot
+The density plot of predictor variables illustrates the zn, chas, dis, lstat predictor variales are hightly skewed. The rm variable is the only predictor that is normally distributed. 
+```{r density boxplot, echo=FALSE, message=FALSE, warning=FALSE}
+#Density
+par(mfrow = c(3, 3))
+d = melt(crime_trainData)
+ggplot(d, aes(x= value)) + 
+    geom_density(fill='red') + facet_wrap(~variable, scales = 'free') 
+
+#Boxplot
+par(mfrow = c(3, 3))
+boxdata = melt(crime_trainData)
+ggplot(boxdata, mapping = aes(x= "", y = value)) + 
+    geom_boxplot(fill="red") + facet_wrap(~variable, scales = 'free')
+
+```
+
+The following looks at all of the predictor variables compared to each other and the response, with red values showing observations where the crime rate exceeded the median.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#need to add one to the color command because 0 sets the color to white.
+pairs(crime_trainData, col = crime_trainData$target+1)
+```
+
+
+#zn
+This variable is hightly skewed to the left. The range is from 85-100.
+```{r zn, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Examine outliers
+get_outliers <-  function(x, n = 10) {
+  
+  v <- abs(x-mean(x,na.rm=TRUE)) > 3*sd(x,na.rm=TRUE)
+  
+  # capture all observations falling into outlier definition sort descending
+  obs <- sort(unique(x[v]), decreasing = T)
+  
+  # handle cases where the number of observations is less than 
+  # the parameter n to return for the top and bottom n values
+  if (length(obs) < 2*n) {n <- floor(length(obs)/2)}
+  
+  hi <- obs[1:n]
+  
+  low <- obs[length(obs):(length(obs)-n +1)]
+  
+  # remove dupilcate entries from the lower bound outliers
+  low <- setdiff(low, hi)
+
+  return (list(Obs=obs, Hi=hi, Low=low))
+  
+}       
+
+(o1 <- get_outliers(crime_trainData$zn))
+
+```
+
+#indus
+This predictor variable is bi-modal.
+```{r indus, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o2 <- get_outliers(crime_trainData$indus))
+```
+
+#nox
+This variable is skewed to the left. 
+```{r nox, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o4 <- get_outliers(crime_trainData$nox))
+```
+#rm
+```{r rm, echo=FALSE, message=FALSE, warning=FALSE}
+(o5 <- get_outliers(crime_trainData$rm))
+```
+#age
+```{r age, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o5 <- get_outliers(crime_trainData$age))
+```
+
+#dis
+```{r dis, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o6 <- get_outliers(crime_trainData$dis))
+```
+
+#rad
+```{r rad, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o7 <- get_outliers(crime_trainData$rad))
+```
+
+#tax
+```{r tax, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o8 <- get_outliers(crime_trainData$tax))
+```
+#ptratio
+```{r ptratio, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o9 <- get_outliers(crime_trainData$ptratio))
+```
+#lstat
+```{r lstat, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o10 <- get_outliers(crime_trainData$lstat))
+```
+#medv
+```{r medv, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+(o11 <- get_outliers(crime_trainData$medv))
+```
+
+# Correlation between variables
+```{r correlation, echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow = c(2, 1))
+chart.Correlation(crime_trainData[1:4])
+chart.Correlation(crime_trainData[5:8])
+chart.Correlation(crime_trainData[9:13])
+
+crimeCorr <- cor(crime_trainData)
+par(mrow=c(2,1))
+corrplot(crimeCorr, method = "circle")
+corrplot(crimeCorr, method = "number")
+
+
+```
+\  
+
+#Data Preparation
+
+\  
+There are no NA values in the data; however, it is possible that zero values in a particular data set may be equivalent to missing information. For instance, we would not expect to see any observation where the average number of rooms per dwelling is equal to zero. We look at the dataset to determine if there are zero values for each variable and check for reasonableness. 
+\
+
+```{r}
+plot_missing(crime_trainData)
+
+#Count of zero values
+kable(colSums(crime_trainData==0))
+```
+
+It is reasonable that there could be no land zoned for large lots (zn) in a particular suburb. The chas variable is a binary variable that tells us whether a suburb borders the Charles river, with zero meaning no, and the target variable is also binary. It is also feasible that the other variables would not necessarilly contain zero values. It appears that this data set did not contain any missing values. 
+
+\ 
+\ 
+
+**Transformations**
+
+In the case of logistic regression, transformations are not necessary as normality of predictors is not required. We can compare the independent variable itself to the dependent variable using marginal model plots to help us determine if transformation improves the fit between the predictor and response. 
+
+https://www.researchgate.net/post/Should_I_transform_non-normal_independent_variables_in_logistic_regression
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+dataT <- crime_trainData
+
+x1 <- glm(target ~. -chas, family= binomial(), data = dataT)
+mmps(x1)
+```
+
+Two which stand out are rad (index of accessibility to radial highways) and tax (full-value property-tax rate per $10,000) which we can transform and then compare the use of the transformed variable and the original in our models.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#transform predictors
+dataT$radlog <- log(dataT$rad)
+dataT$taxlog <- log(dataT$tax)
+
+x2 <- glm(target ~ rad+radlog+tax+taxlog, family= binomial(), data = dataT)
+
+mmps(x2)
+```
+It looks as though our fit has improved. We will determine if this improves the overall model in the next section.
