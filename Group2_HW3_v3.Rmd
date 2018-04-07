@@ -22,11 +22,13 @@ Slack was used to by the team to communicate during the project and for quick ac
 library(psych)
 library(dplyr)
 library(ggplot2)
-#library(DataExplorer)
+library(DataExplorer)
 library(PerformanceAnalytics)
 library(corrplot)
 library(knitr)
 library(car)
+library(reshape)
+
 
 ```
 
@@ -239,3 +241,26 @@ x2 <- glm(target ~ rad+radlog+tax+taxlog, family= binomial(), data = dataT)
 mmps(x2)
 ```
 It looks as though our fit has improved. We will determine if this improves the overall model in the next section.
+
+
+
+## Build Models
+
+Three models have been built: A binary logistic regression model based on the training data, a binary logistic model based on transformed data, and a stepwise binary logistic regression model based on the training data.
+```{r}
+model <- glm(target ~ ., family=binomial(link='logit'), data=crime_trainData)
+summary(model)
+```
+As we can see in our first model, `zn`, `indus`, `chas`, `rm`, `age`, `tax`, and `lstat` are not statistically significant. As for the statistically significant variables, `nox` and `rad` have the lowest p-values suggetsing a strong association between nitrogen oxide concentration and accessibility to radial highways with the probability of crime rates above the median.
+```{r}
+model2 <- glm(target ~ ., family=binomial(link='logit'), data=dataT)
+summary(model2)
+```
+When we call our second model, we see an uptick in significance in the `tax` variable, and the new `taxlog` variable has one of the lowest p-values suggesting a strong association between property tax rate and crime rates. `ptratio`, the pupil-teacher ratio by town, also saw an increase in significance when running model2 with the transformed data.
+```{r}
+model3 <- step(model, direction="both")
+summary(model3)
+```
+The third model is a stepwise regression which shows `rad` and `nox` to be the most statistically significant similar to the first model. The model chose to keep `zn`, `nox`, `age`, `dis`, `rad`, `tax`,  `ptratio`, and `medv` variables.
+
+The AIC values of Model1, Model2, and Model3 are 217.91, 187.03, 215.15, respectively.
