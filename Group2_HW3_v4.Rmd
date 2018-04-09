@@ -1,0 +1,570 @@
+---
+title: "Group#2 Homework# 3 - Logistic Regression"
+author: "Group 2"
+date: "3/29/2018"
+output: html_document
+---
+#Introduction
+This assignment explores, analyze and model a dataset containing information about crime in various neighborhoods in a major city. Each record has a response variable indicating whether or not the crime rate is above the median crime rate (1) or not (0). The crime dataset contains 18 variables and 466 observations. 
+#Objective and Requirements
+The objective is to build a binary logistic regression model on the training dataset to predict whether the neighborhood will be at risk for high crime levels. Classifications and probabilities for the evaluation dataset using the binary logistic regression model. 
+#Approach
+The team met to discuss this assignment and an approach to plan, complete the assignment. Each of the 5 team members was assigned tasks. The following tasks were assigned:
+*Data Exploration
+*Data Preparation
+*Build Models
+*Select Models
+
+Github was used to manage the project. Using Github helped with version control and ensured each team member had access to the latest version of the project documentation. 
+
+Slack was used to by the team to communicate during the project and for quick access to code and documentation.
+```{r Libraries, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(psych)
+library(dplyr)
+library(ggplot2)
+library(DataExplorer)
+library(PerformanceAnalytics)
+library(corrplot)
+library(knitr)
+library(car)
+library(reshape2)
+library(usdm)       # for VIF tests
+library(caret)
+#library(fmsb)
+library(bestglm)
+
+```
+
+#Dataset
+For reproducibility of the results, the data was loaded to and accessed from a Github repository. The age variable was rounded to a whole number.
+```{r Load data, echo=FALSE, message=FALSE, warning=FALSE}
+crime_trainData <- read.csv("https://raw.githubusercontent.com/indianspice/DATA621/master/Hw3/crime-training-data_modified%20(1).csv", header = 3)
+
+crime_trainData$age <- round(crime_trainData[,6], digits = 0)
+
+```
+
+#Data Exploration
+The following variables comprise the data set. The response variable (Target) is the variable of interest. The response variable is binary (0, 1) and identifies whether the crime rate is above the median crime rate. The remaining 12 variables are predictors. All variables are numeric. 
+```{r Data Set Metadata, echo=FALSE, message=FALSE, warning=FALSE}
+Variable_names <- c("zn","indus", "chas", "nox", "rm", "age", "dis", "rad", "tax",
+                     "ptratio", "lstat", "medv", "target")
+
+Definitions <- c("proportion of residential land zoned for large lots (over 25000 square feet)", "proportion of non-retail business acres per suburb", "a dummy var. for whether the suburb borders the Charles River (1) or not (0)", "nitrogen oxides concentration (parts per 10 million)", " average number of rooms per dwelling", "proportion of owner-occupied units built prior to 1940", "weighted mean of distances to five Boston employment centers"," index of accessibility to radial highways", "full-value property-tax rate per $10,000", " pupil-teacher ratio by town", " lower status of the population (percent)", "median value of owner-occupied homes in $1000s", "whether the crime rate is above the median crime rate (1) or not (0)")
+
+Variable_type <-c("Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", "Response")
+
+Data_type <- c("Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count", "Count")
+
+df_crime_md <- cbind.data.frame (Variable_names, Definitions, Variable_type, Data_type)
+
+colnames(df_crime_md) <- c("Variable Name", "Definition", "Variable Type", "Data Type") 
+knitr::kable(df_crime_md)
+```
+
+Descriptive statistics were calculated to examine the basic features of the data. Each variable has 466 observations.  
+```{r EDA, echo=FALSE, message=FALSE, warning=FALSE}
+#Use Describe Package to calculate Descriptive Statistic
+(df_crime_des <- describe(crime_trainData, na.rm=TRUE, interp=FALSE, skew=TRUE, ranges=TRUE, trim=.1, type=3, check=TRUE, fast=FALSE, quant=c(.1,.25,.75,.90), IQR=TRUE))
+
+#Calculate mean missing values per variable
+crime_trainData %>% summarize_all(funs(sum(is.na(.)) / length(.)))
+
+```
+
+
+#Density Plot
+The density plot of predictor variables illustrates the zn, chas, dis, lstat predictor variales are hightly skewed. The rm variable is the only predictor that is normally distributed. 
+```{r density boxplot, echo=FALSE, message=FALSE, warning=FALSE}
+#Density
+par(mfrow = c(3, 3))
+d = melt(crime_trainData)
+ggplot(d, aes(x= value)) + 
+    geom_density(fill='red') + facet_wrap(~variable, scales = 'free') 
+
+#Boxplot
+par(mfrow = c(3, 3))
+boxdata = melt(crime_trainData)
+ggplot(boxdata, mapping = aes(x= "", y = value)) + 
+    geom_boxplot(fill="red") + facet_wrap(~variable, scales = 'free')
+
+```
+
+The following looks at all of the predictor variables compared to each other and the response, with red values showing observations where the crime rate exceeded the median.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#need to add one to the color command because 0 sets the color to white.
+pairs(crime_trainData, col = crime_trainData$target+1)
+```
+
+
+#zn
+This variable is hightly skewed to the left. The range is from 85-100.
+```{r zn, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Examine outliers
+get_outliers <-  function(x, n = 10) {
+  
+  v <- abs(x-mean(x,na.rm=TRUE)) > 3*sd(x,na.rm=TRUE)
+  
+  # capture all observations falling into outlier definition sort descending
+  obs <- sort(unique(x[v]), decreasing = T)
+  
+  # handle cases where the number of observations is less than 
+  # the parameter n to return for the top and bottom n values
+  if (length(obs) < 2*n) {n <- floor(length(obs)/2)}
+  
+  hi <- obs[1:n]
+  
+  low <- obs[length(obs):(length(obs)-n +1)]
+  
+  # remove duplicate entries from the lower bound outliers
+  low <- setdiff(low, hi)
+
+  return (list(Obs=obs, Hi=hi, Low=low))
+  
+}       
+
+(o1 <- get_outliers(crime_trainData$zn))
+
+```
+
+#indus
+This predictor variable is bi-modal.
+```{r indus, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o2 <- get_outliers(crime_trainData$indus))
+```
+
+#nox
+This variable is skewed to the left. 
+```{r nox, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o4 <- get_outliers(crime_trainData$nox))
+```
+#rm
+```{r rm, echo=FALSE, message=FALSE, warning=FALSE}
+(o5 <- get_outliers(crime_trainData$rm))
+```
+#age
+```{r age, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o5 <- get_outliers(crime_trainData$age))
+```
+
+#dis
+```{r dis, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o6 <- get_outliers(crime_trainData$dis))
+```
+
+#rad
+```{r rad, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o7 <- get_outliers(crime_trainData$rad))
+```
+
+#tax
+```{r tax, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o8 <- get_outliers(crime_trainData$tax))
+```
+#ptratio
+```{r ptratio, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o9 <- get_outliers(crime_trainData$ptratio))
+```
+#lstat
+```{r lstat, echo=FALSE, message=FALSE, warning=FALSE}
+
+(o10 <- get_outliers(crime_trainData$lstat))
+```
+#medv
+```{r medv, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+(o11 <- get_outliers(crime_trainData$medv))
+```
+
+# Correlation between variables
+```{r correlation, echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow = c(2, 1))
+chart.Correlation(crime_trainData[1:4])
+chart.Correlation(crime_trainData[5:8])
+chart.Correlation(crime_trainData[9:13])
+
+crimeCorr <- cor(crime_trainData)
+par(mrow=c(2,1))
+corrplot(crimeCorr, method = "circle")
+corrplot(crimeCorr, method = "number")
+
+
+```
+\  
+
+## Multicollinearity
+
+This section will test the predictor variables to determine if there is correlation among them.  Variance inflaction factors (VIF) is used to detect multicollinearity, specifically among the entire set of predictors versus within pairs of variables.   
+
+Testing for Collinearity among the predictor variables, we see that the following variables may have a problem with collinearity:  
+
+```{r multicollinearity}
+vifcor(crime_trainData[, 1:12],th=0.4)
+```
+
+__Variable Name__  
+* tax  
+* nox  
+* dis  
+* lstat  
+* medv  
+* indus  
+* age  
+* ptratio  
+
+
+```{r echo=F }
+
+vifstep(crime_trainData[, 1:12])
+
+```
+
+If we set our VIF threshold at 4, the following predictor variables are highly correlated.  
+
+Variable Name | VIF 
+--------------| -------
+indus |  4.120617
+dis | 4.243532
+nox | 4.504675
+rad | 6.782250
+tax | 9.217602
+
+
+
+#Data Preparation
+
+\  
+There are no NA values in the data; however, it is possible that zero values in a particular data set may be equivalent to missing information. For instance, we would not expect to see any observation where the average number of rooms per dwelling is equal to zero. We look at the dataset to determine if there are zero values for each variable and check for reasonableness. 
+\
+
+```{r echo=F}
+plot_missing(crime_trainData)
+
+#Count of zero values
+kable(colSums(crime_trainData==0))
+```
+
+It is reasonable that there could be no land zoned for large lots (zn) in a particular suburb. The chas variable is a binary variable that tells us whether a suburb borders the Charles river, with zero meaning no, and the target variable is also binary. It is also feasible that the other variables would not necessarilly contain zero values. It appears that this data set did not contain any missing values. 
+
+\ 
+\ 
+
+**Transformations**
+
+In the case of logistic regression, transformations are not necessary as normality of predictors is not required. We can compare the independent variable itself to the dependent variable using marginal model plots to help us determine if transformation improves the fit between the predictor and response. 
+
+https://www.researchgate.net/post/Should_I_transform_non-normal_independent_variables_in_logistic_regression
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+dataT <- crime_trainData
+
+x1 <- glm(target ~. -chas, family= binomial(), data = dataT)
+mmps(x1)
+```
+
+Two which stand out are rad (index of accessibility to radial highways) and tax (full-value property-tax rate per $10,000) which we can transform and then compare the use of the transformed variable and the original in our models.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#transform predictors
+dataT$radlog <- log(dataT$rad)
+dataT$taxlog <- log(dataT$tax)
+
+x2 <- glm(target ~ rad+radlog+tax+taxlog, family= binomial(), data = dataT)
+
+mmps(x2)
+```
+It looks as though our fit has improved. We will determine if this improves the overall model in the next section.
+
+#Build Models
+
+
+
+```{r helper-functions, echo=F}
+
+show_metrics <- function(model, train, test) {
+  
+  
+  # calculate AIC/BIC
+  print(paste("AIC= ", round(AIC(model), 3)))
+  print(paste("BIC= ", round(BIC(model), 3)))
+  print("")
+  
+  print("")
+  
+  pred_model <- predict(model, test, type = 'response')
+  y_pred_model <- as.factor(ifelse(pred_model > 0.5, 1, 0))
+
+  confusionMatrix(test$target, y_pred_model, positive = "1", mode="everything" ) 
+  
+  #Include ROC 
+  #roc_model1 <- roc(target ~ pred_model, data = test)
+
+  #plot_roc <- plot(roc_model1, col="red", main = "Model 1 ROC")
+}
+
+#show_metrics(res.bestglm$BestModel, dev_train_T, dev_test_T) 
+
+set.seed(1255)
+
+# convert the target response variable to a factor 
+crime_trainData$target <- as.factor(crime_trainData$target)
+
+idx <-createDataPartition(y=crime_trainData$target,p=0.7,list=FALSE)
+dev_train <-crime_trainData[idx,]
+dev_test <-crime_trainData[-idx,]
+
+dev_train_T <- dev_train
+dev_test_T <- dev_test
+
+# apply the log transformations
+dataT <- crime_trainData
+dataT$rad <- log(dataT$rad)
+dataT$tax <- log(dataT$tax)
+
+idx <-createDataPartition(y=dataT$target,p=0.7,list=FALSE)
+dev_train_T <-crime_trainData[idx,]
+dev_test_T <-crime_trainData[-idx,]
+
+
+```
+
+### Model 1 : Baseline using all Predictor Variables
+
+As a baseline, the first model build will be a logistic regression model using all provided, untransformed predictor variables provided.
+
+```{r build_model1}
+
+model1 <- glm(target ~ ., family=binomial(), data=dev_train)
+
+summary(model1)
+
+```
+
+As we can see in our first model, `zn`, `indus`, `chas`, `rm`, `tax`, and `lstat` are not statistically significant. As for the statistically significant variables, `nox` and `rad` have the lowest p-values suggesting a strong association between nitrogen oxide concentration and accessibility to radial highways with the probability of crime rates above the median.
+
+
+```{r coeff_model1} 
+
+exp(coef(model1))
+
+```
+
+
+Recall that the estimates from logistic regression characterize the relationship between the predictor and response variable on a log-odds scale. This suggests that for every one unit increase in `nox`, the log-odds of the crime rate increases signficantly in magnitude.  Access to radial highways, while not nearly to the same magnitude, also increases the the log-odds of crime above the median.
+
+It is interesting to note that that `nox` is a significant predictor of crime by orders of magnitude when compared to the other significant predictors.  NOx (nitrogen dioxide and nitric oxide) are typcially associated with smog and acid rain pollution.  NOx has been linked to adverse health effects in humans.
+
+
+__AIC (Akaike Information Criterion) for Model 1__ = `r AIC(model1)`  
+__BIC (Bayesian Information Criterion) for Model 1__ = `r BIC(model1)`
+
+### Model 2 : Baseline using Transformed Variables
+
+In the data preparation section, the log transformation of the the `rad` and `tax` predictor variables where determined to be potentially beneficial transformations.  This model will use those transformed variables and repeat the modeling process in Model 1. 
+
+
+```{r build_model2}
+
+model2 <- glm(target ~ .,  family=binomial(), data=dev_train_T)
+
+summary(model2)
+
+```
+
+Contrasting against model 1, we now see that `nox`, `age`, and `rad` (log-transformed) are now the most statistically significant variables with `dis`, `tax` (log-transformed), and `ptratio` showing some significance but to a lesser degree.  
+
+Model 2 sees an uptick in significance in the tax variable, and the new taxlog variable has one of the lowest p-values suggesting a strong association between property tax rate and crime rates. Of interest here is that this is only predictor variable which is showing a log-odds decrease in crime for an unit increase in the tax rate.
+
+`ptratio`, the pupil-teacher ratio by town, also saw an increase in significance when running model 2 with the transformed data.
+
+
+
+```{r coeff_model2} 
+
+exp(coef(model1))
+
+```
+
+
+__AIC (Akaike Information Criterion) for Model 2__ = `r AIC(model2)`  
+__BIC (Bayesian Information Criterion) for Model 2__ = `r BIC(model2)`  
+
+#### Model 1 - Model 2 Comparison
+
+Comparing the two models using a Chi-square test, there's no significance difference detected between the two.  However, we do see that Model 2 resulted in a slightly lower AIC value.  Consequently, further modeling will be based on the transformed dataset.
+
+```{r anova1-2} 
+
+anova(model1, model2,  test="Chisq")
+
+```
+
+### Model 3 : AIC Stepwise Variable Selection 
+
+The third model used was a stepwise regression, and we chose to use both the "forward" and "backward" methods to obtain the optimal model. Since we chose to model forward with the transformed dataset we used it here as well. 
+
+After starting from nothing and adding variables one at a time, then repeating the process backwards starting with a full dataset and subracting variables one at a time, the ideal model chosen included `zn`, `indus`, `nox`, `age`, `dis`, `rad`, `tax`, `ptratio`, and `medv`, with `nox`, `age`, and `rad` having the most statistical significance as shown by the summary below.
+```{r model3-build, echo=F} 
+
+mod3 <- glm(target ~ .,  family=binomial(), data=dev_train_T)
+
+model3 <- step(mod3, direction="both")
+
+summary(model3)
+
+anova(model3)
+```
+__AIC (Akaike Information Criterion) for Model 3__ = `r AIC(model3)`  
+__BIC (Bayesian Information Criterion) for Model 3__ = `r BIC(model3)`  
+
+#### Model3 - Model2 Comparison
+Since Model2 was a better choice than Model1, we compared Model3 to it using a Chi-square test. The tow models do not appear to have signifcant differences, however Model3 has a lower AIC value.
+
+```{r}
+anova(model2, model3, test = "Chisq")
+```
+
+### Model 4 : Using VIF Reduction with Transformed Predictor Variables
+
+Since multicollinearity was detected during the EDA phase, Model 4 will select meaningful variables using VIF reduction.  The presence of multicollinearity among predictors can lead to overfitting so this modeling approach will attempt to limit that by reducing the predictor variables to those with lower magnitude VIF.
+
+
+```{r model4-build, echo=F} 
+
+model4 <- glm(target ~ . , family=binomial(), data=dev_train_T)
+
+```
+
+Calculating and reviewing VIF for the predictor variables (below):
+
+```{r model4-vif, echo =F} 
+
+car::vif(model4)
+
+```
+
+We see that `nox`, `rm`, and `medv` have the high variance inflation factor.  However, knowing the signifcance of nox, we'll keep this variable as a predictor and update the model to remove `rm` and `medv`.
+
+```{r update-model4-vif, echo =F} 
+
+model4 <- update(model4, . ~ . -rm -medv)
+
+
+```
+
+In the summary of model 4, several variables are not statistically significant and will be dropped from the final model 4.
+
+__Dropped Variables__  
+* zn  
+* chas  
+* dis  
+* ptratio  
+* lstat   
+
+
+
+```{r update-model4-summary, echo =F} 
+
+model4 <- update(model4, . ~ . -zn -chas -dis - ptratio -lstat)
+
+summary(model4)
+
+```
+
+__AIC (Akaike Information Criterion) for Model 4__ = `r AIC(model4)`  
+__BIC (Bayesian Information Criterion) for Model 4__ = `r BIC(model4)`   
+
+
+
+
+### Model 5 : Using BestGlm using Transformed Predictors
+
+In the final model build the `bestglm` R package is used to determine the best set of predictors using both AIC and BIC as selection criteria.  
+
+#### Using Alkaike Information Criterion (BIC)
+
+```{r model5-build-aic, echo=F} 
+
+# dataframe containing the design matrix of X and the output Y
+bestglm_df <- within(dev_train_T, {
+  y    <- target           # outcome variable must be named y
+  target <- NULL           # drop target as a variable after it's been move to y
+})
+
+## AIC 
+res.bestglm.aic <-
+  bestglm(Xy = bestglm_df,
+          family = binomial(),
+          IC = "AIC",                 # AIC Information criteria for
+          method = "exhaustive")
+```
+
+Looking at the top 5 best models based on lowest AIC, the variables `zn`, `indus`, `nox`, `age`, `dis`, `rad`, `tax`, `ptratio`, and `medv` are selected.  Top 5 models are shown below:
+
+```{r echo=F} 
+## Show top 5 models
+res.bestglm.aic$BestModels
+
+```
+
+The resulting model based on lowest AIC is not dissimilar from previous models.  We see `nox`, `age`, and `rad` (again log-transformed) as the most significatn predictors.
+
+```{r echo=F} 
+model5.aic <- res.bestglm.aic$BestModel
+
+summary(model5.aic)
+
+```
+
+--- 
+
+#### Using Bayesian Information Criterion (BIC)
+
+Calculate the best set of predictors using Bayesian Information Criterion (BIC).  The model with the loweset BIC will be selected.
+
+```{r model5-build-bic, echo=F} 
+
+## BIC 
+res.bestglm.bic <-
+  bestglm(Xy = bestglm_df,
+          family = binomial(),
+          IC = "BIC",                 # Use BIC Information  
+          method = "exhaustive")
+
+```
+
+Looking at the top 5 best models based on lowest BIC, the variables `indus`, `nox`, `age`, `rad`,  and `tax` are selected.  Top 5 models are shown below:
+
+```{r echo=F} 
+## Show top 5 models
+res.bestglm.bic$BestModels
+
+```
+
+It should be noted that this model based on BIC uses the fewest number of predictors compared to the other model builds.  The inclusion of the `indus` variable has a marginal affect on BIC so for simplicity of the second best model will be used.
+
+
+```{r anova-model5-aic-bic} 
+
+
+model5.bic <- glm(target ~ nox + age + rad + tax, family=binomial(), data=dev_train_T)
+
+summary(model5.bic)
+
+```
+
+The resulting BIC model uses `nox`, `age`, `rad`, and `tax` as the final set of predictors.  All are significantly significant.  
+
+
+
+
