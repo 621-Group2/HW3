@@ -485,6 +485,9 @@ __AIC (Akaike Information Criterion) for Model 4__ = `r AIC(model4)`
 __BIC (Bayesian Information Criterion) for Model 4__ = `r BIC(model4)`   
 
 
+```{r}
+anova(model3, model4, test = "Chisq")
+```
 
 
 ### Model 5 : Using BestGlm using Transformed Predictors
